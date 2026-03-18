@@ -12,13 +12,13 @@ describe('MistralProvider', () => {
   it('should set defaults correctly', () => {
     const provider = new MistralProvider({ apiKey: 'sk-test' });
     assert.equal(provider.name, 'mistral');
-    assert.equal(provider.model, 'mistral-medium');
+    assert.equal(provider.model, 'mistral-large-latest');
     assert.equal(provider.isConfigured, true);
   });
 
   it('should accept custom model', () => {
-    const provider = new MistralProvider({ apiKey: 'sk-test', model: 'mistral-medium-highspeed' });
-    assert.equal(provider.model, 'mistral-medium-highspeed');
+    const provider = new MistralProvider({ apiKey: 'sk-test', model: 'mistral-small-2603' });
+    assert.equal(provider.model, 'mistral-small-2603');
   });
 
   it('should report not configured without API key', () => {

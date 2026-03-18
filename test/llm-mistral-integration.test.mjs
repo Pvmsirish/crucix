@@ -1,144 +1,30 @@
-// Mistral provider — unit tests
-// Uses Node.js built-in test runner (node:test) — no extra dependencies
+// Mistral provider — integration test (calls real API)
+// Requires MISTRAL_API_KEY environment variable
+// Run: MISTRAL_API_KEY=sk-... node --test test/llm-minimax-integration.test.mjs
 
-import { describe, it, mock, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { MistralProvider } from '../lib/llm/mistral.mjs';
-import { createLLMProvider } from '../lib/llm/index.mjs';
 
-// ─── Unit Tests ───
+const API_KEY = process.env.MISTRAL_API_KEY;
 
-describe('MistralProvider', () => {
-  it('should set defaults correctly', () => {
-    const provider = new MistralProvider({ apiKey: 'sk-test' });
-    assert.equal(provider.name, 'mistral');
-    assert.equal(provider.model, 'mistral-medium');
+describe('Mistral integration', { skip: !API_KEY && 'MISTRAL_API_KEY not set' }, () => {
+  it('should complete a prompt with mistral large latest', async () => {
+    const provider = new MistralProvider({ apiKey: API_KEY, model: 'mistral-large-latest' });
     assert.equal(provider.isConfigured, true);
-  });
 
-  it('should accept custom model', () => {
-    const provider = new MistralProvider({ apiKey: 'sk-test', model: 'mistral-large-latest' });
-    assert.equal(provider.model, 'mistral-large-latest');
-  });
-
-  it('should report not configured without API key', () => {
-    const provider = new MistralProvider({});
-    assert.equal(provider.isConfigured, false);
-  });
-
-  it('should throw on API error', async () => {
-    const provider = new MistralProvider({ apiKey: 'sk-test' });
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mock.fn(() =>
-      Promise.resolve({ ok: false, status: 401, text: () => Promise.resolve('Unauthorized') })
+    const result = await provider.complete(
+      'You are a helpful assistant. Respond in exactly one sentence.',
+      'What is 2+2?',
+      { maxTokens: 128, timeout: 30000 }
     );
-    try {
-      await assert.rejects(
-        () => provider.complete('system', 'user'),
-        (err) => {
-          assert.match(err.message, /Mistral API 401/);
-          return true;
-        }
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
 
-  it('should parse successful response', async () => {
-    const provider = new MistralProvider({ apiKey: 'sk-test' });
-    const mockResponse = {
-      choices: [{ message: { content: 'Hello from Mistral' } }],
-      usage: { prompt_tokens: 10, completion_tokens: 5 },
-      model: 'mistral-medium',
-    };
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mock.fn(() =>
-      Promise.resolve({ ok: true, json: () => Promise.resolve(mockResponse) })
-    );
-    try {
-      const result = await provider.complete('You are helpful.', 'Say hello');
-      assert.equal(result.text, 'Hello from Mistral');
-      assert.equal(result.usage.inputTokens, 10);
-      assert.equal(result.usage.outputTokens, 5);
-      assert.equal(result.model, 'mistral-medium');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('should send correct request format', async () => {
-    const provider = new MistralProvider({ apiKey: 'sk-test-key', model: 'mistral-medium' });
-    let capturedUrl, capturedOpts;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mock.fn((url, opts) => {
-      capturedUrl = url;
-      capturedOpts = opts;
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({
-          choices: [{ message: { content: 'ok' } }],
-          usage: { prompt_tokens: 1, completion_tokens: 1 },
-          model: 'mistral-medium',
-        }),
-      });
-    });
-    try {
-      await provider.complete('system prompt', 'user message', { maxTokens: 2048 });
-      assert.equal(capturedUrl, 'https://api.mistral.ai/v1/chat/completions');
-      assert.equal(capturedOpts.method, 'POST');
-      const headers = capturedOpts.headers;
-      assert.equal(headers['Content-Type'], 'application/json');
-      assert.equal(headers['Authorization'], 'Bearer sk-test-key');
-      const body = JSON.parse(capturedOpts.body);
-      assert.equal(body.model, 'mistral-medium');
-      assert.equal(body.max_tokens, 2048);
-      assert.equal(body.messages[0].role, 'system');
-      assert.equal(body.messages[0].content, 'system prompt');
-      assert.equal(body.messages[1].role, 'user');
-      assert.equal(body.messages[1].content, 'user message');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('should handle empty response gracefully', async () => {
-    const provider = new MistralProvider({ apiKey: 'sk-test' });
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mock.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ choices: [], usage: {} }),
-      })
-    );
-    try {
-      const result = await provider.complete('sys', 'user');
-      assert.equal(result.text, '');
-      assert.equal(result.usage.inputTokens, 0);
-      assert.equal(result.usage.outputTokens, 0);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-});
-
-// ─── Factory Tests ───
-
-describe('createLLMProvider — mistral', () => {
-  it('should create MistralProvider for provider=mistral', () => {
-    const provider = createLLMProvider({ provider: 'mistral', apiKey: 'sk-test', model: null });
-    assert.ok(provider instanceof MistralProvider);
-    assert.equal(provider.name, 'mistral');
-    assert.equal(provider.isConfigured, true);
-  });
-
-  it('should be case-insensitive', () => {
-    const provider = createLLMProvider({ provider: 'Mistral', apiKey: 'sk-test', model: null });
-    assert.ok(provider instanceof MistralProvider);
-  });
-
-  it('should return null for empty provider', () => {
-    const provider = createLLMProvider({ provider: null, apiKey: 'sk-test', model: null });
-    assert.equal(provider, null);
+    assert.ok(result.text.length > 0, 'Response text should not be empty');
+    assert.ok(result.usage.inputTokens > 0, 'Should report input tokens');
+    assert.ok(result.usage.outputTokens > 0, 'Should report output tokens');
+    assert.ok(result.model, 'Should report model name');
+    console.log(`  Response: ${result.text}`);
+    console.log(`  Tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out`);
+    console.log(`  Model: ${result.model}`);
   });
 });
